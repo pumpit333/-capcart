@@ -1,0 +1,15 @@
+{
+  "monthlyBudget": 300,
+  "blockedCategories": [
+    "alcohol",
+    "gambling",
+    "weapons"
+  ],
+  "categoryCaps": {
+    "electronics": 150,
+    "fitness": 60,
+    "kitchen": 100,
+    "shoes": 120,
+    "apparel": 80
+  }
+}

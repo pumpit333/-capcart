@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: capcart
+    runtime: node
+    plan: free
+    buildCommand: echo "zero dependencies - nothing to install"
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      # Optional. Leave empty: the server falls back to Render's RENDER_EXTERNAL_URL.
+      # Set it only when using a custom domain (for example https://capcart.example.com).
+      - key: BASE_URL
+        sync: false
+      - key: MONTHLY_BUDGET
+        value: "300"
+      - key: WALLET_FILE
+        value: /tmp/wallet.json

@@ -1,0 +1,705 @@
+openapi: 3.1.0
+info:
+  title: CapCart API
+  version: 1.0.0
+  summary: AI shopping agent with deterministic budget guardrails and PayPal checkout.
+  description: |
+    CapCart turns a natural-language shopping request ("a gift for a new runner, under $60")
+    into a guarded cart and a PayPal order.
+
+    **AI proposes, code guarantees, human approves, PayPal pays.**
+
+    Typical flow:
+
+    1. `POST /api/plan` - an LLM (or an offline heuristic) parses intent and proposes a cart;
+       deterministic guardrails then enforce the budget, spending policies, the hard cap and the
+       monthly wallet, and quarantine prompt-injected catalog items.
+    2. `POST /api/approve` - a human approves the guarded cart; a PayPal order is created
+       (sandbox, or simulated when no PayPal credentials are configured) and the wallet is debited.
+    3. The buyer approves at PayPal and is sent to `GET /return`, which captures the order and
+       redirects back to the UI.
+
+    All amounts are in USD. State (plans) is held in memory and is lost on restart.
+  license:
+    name: MIT
+    identifier: MIT
+  contact:
+    name: CapCart
+servers:
+  - url: http://localhost:3000
+    description: Local development (set PORT to change)
+  - url: https://{host}
+    description: Hosted deployment (for example Render)
+    variables:
+      host:
+        default: capcart.onrender.com
+        description: Hostname of your deployment.
+security: []  # No authentication: demo app; PayPal credentials are server-side only.
+tags:
+  - name: System
+    description: Runtime configuration and monthly wallet.
+  - name: Planning
+    description: Create and read guarded shopping plans.
+  - name: Checkout
+    description: Human approval, PayPal order creation and capture.
+paths:
+  /api/status:
+    get:
+      operationId: getStatus
+      tags: [System]
+      summary: Get runtime mode
+      description: Reports which AI backend and PayPal mode the server is running in, and the per-order hard cap.
+      responses:
+        '200':
+          description: Current runtime configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+              examples:
+                offline:
+                  summary: No API keys configured
+                  value:
+                    ai: offline heuristic
+                    paypal: simulated
+                    hardCap: 500
+                live:
+                  summary: Gemini and PayPal sandbox configured
+                  value:
+                    ai: gemini (gemini-2.0-flash)
+                    paypal: sandbox
+                    hardCap: 500
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /api/wallet:
+    get:
+      operationId: getWallet
+      tags: [System]
+      summary: Get monthly wallet and spending policy
+      description: Returns the persisted monthly wallet (resets each calendar month, UTC) and the active spending policy.
+      responses:
+        '200':
+          description: Wallet and policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+              example:
+                wallet:
+                  month: 2026-10
+                  limit: 300
+                  spent: 54.49
+                  history:
+                    - at: '2026-10-30T12:00:00.000Z'
+                      amount: 54.49
+                      ref: SIMULATED-3f2a9c1e
+                  remaining: 245.51
+                policy:
+                  monthlyBudget: 300
+                  blockedCategories: [alcohol, gambling, weapons]
+                  categoryCaps:
+                    electronics: 150
+                    fitness: 60
+                    kitchen: 100
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /api/plan:
+    post:
+      operationId: createPlan
+      tags: [Planning]
+      summary: Create a guarded shopping plan
+      description: |
+        Runs the agent pipeline: intent extraction (LLM or heuristic), deterministic catalog retrieval
+        with prompt-injection quarantine, LLM cart planning, then guardrails. The effective cap is
+        `min(request budget, hard cap, monthly wallet remaining)`. Nothing is charged by this call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+            examples:
+              gift:
+                summary: Gift with a budget
+                value:
+                  request: a gift for a new runner, under $60
+      responses:
+        '200':
+          description: The guarded plan, including the audit trail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanResponse'
+              example:
+                planId: 3f2a9c1e-7b5d-4c1a-9e0f-1a2b3c4d5e6f
+                intent:
+                  goal: a gift for a new runner, under $60
+                  budget: 60
+                  keywords: [runner, gift]
+                  maxItems: 3
+                  source: heuristic
+                summary: 'Greedy plan (offline mode): most relevant items that fit the budget.'
+                tradeoffs: ''
+                cart:
+                  lines:
+                    - id: p01
+                      name: Reflective running vest
+                      category: running
+                      price: 24.99
+                      tags: [safety, night, runner, gift]
+                      qty: 1
+                      reason: Matches 2 of your keywords
+                      lineTotal: 24.99
+                    - id: p02
+                      name: Moisture-wicking running socks (3 pack)
+                      category: running
+                      price: 14.5
+                      tags: [runner, comfort, gift]
+                      qty: 1
+                      reason: Matches 2 of your keywords
+                      lineTotal: 14.5
+                  total: 39.49
+                  budget: 60
+                  audit:
+                    - Final total 39.49 USD ≤ cap 60 USD. Waiting for human approval.
+                audit:
+                  - 'Intent parsed by heuristic: budget=60, keywords=runner, gift'
+                  - Retrieved 10 candidate products from catalog.
+                  - Cart planned by heuristic.
+                  - Final total 39.49 USD ≤ cap 60 USD. Waiting for human approval.
+        '400':
+          description: The request text is missing, empty or longer than 500 characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Request must be 1-500 characters.
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      operationId: getPlan
+      tags: [Planning]
+      summary: Get a plan by id
+      description: Returns the cart, audit trail and (once approved) the PayPal order of an in-memory plan.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: The `planId` returned by `POST /api/plan`.
+          schema:
+            type: string
+            format: uuid
+          example: 3f2a9c1e-7b5d-4c1a-9e0f-1a2b3c4d5e6f
+      responses:
+        '200':
+          description: The stored plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDetails'
+        '404':
+          $ref: '#/components/responses/UnknownPlan'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /api/approve:
+    post:
+      operationId: approvePlan
+      tags: [Checkout]
+      summary: Approve a plan and create the PayPal order
+      description: |
+        Human approval step. Re-checks the cart against the cap, hard cap and remaining monthly
+        wallet, creates a PayPal order (`intent: CAPTURE`; simulated when no PayPal credentials are
+        configured) and debits the wallet. Idempotent: approving an already-approved plan returns the
+        existing order without a second debit. Redirect the buyer to `order.approveUrl`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRequest'
+            example:
+              planId: 3f2a9c1e-7b5d-4c1a-9e0f-1a2b3c4d5e6f
+      responses:
+        '200':
+          description: The PayPal order and updated wallet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproveResponse'
+              example:
+                order:
+                  id: SIMULATED-3f2a9c1e
+                  approveUrl: http://localhost:3000/return?token=SIMULATED-3f2a9c1e&plan=3f2a9c1e-7b5d-4c1a-9e0f-1a2b3c4d5e6f
+                  simulated: true
+                audit:
+                  - Final total 39.49 USD ≤ cap 60 USD. Waiting for human approval.
+                  - 'Wallet: 39.49 USD charged to monthly budget — 260.51 of 300 left this month.'
+                  - Human approved. PayPal order SIMULATED-3f2a9c1e created (simulated).
+                wallet:
+                  month: 2026-10
+                  limit: 300
+                  spent: 39.49
+                  history: []
+                  remaining: 260.51
+        '400':
+          description: Unanswered clarifying questions (`Answer the agent's questions first.`), empty cart, total above the cap, or total above the remaining monthly budget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                emptyCart:
+                  value:
+                    error: Empty cart — nothing to pay.
+                overCap:
+                  value:
+                    error: 'Guardrail: total exceeds cap.'
+                overWallet:
+                  value:
+                    error: 'Guardrail: total exceeds remaining monthly budget (12.5).'
+        '404':
+          $ref: '#/components/responses/UnknownPlan'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /api/catalog:
+    get:
+      operationId: getCatalog
+      tags: [Planning]
+      summary: List purchasable products
+      description: Catalog for the UI. Quarantined (prompt-injected) items are excluded. Images are served from `/img/{id}.svg`.
+      responses:
+        '200':
+          description: Products.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CatalogProduct'
+  /api/answer:
+    post:
+      operationId: answerQuestions
+      tags: [Planning]
+      summary: Answer the agent's clarifying questions (size, color)
+      description: |
+        Options are validated strictly against the product's variants; an invalid value returns 400 and
+        changes nothing. Returns the same shape as `POST /api/plan` with updated `cart` and `questions`.
+        `POST /api/approve` is blocked until `questions` is empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerRequest'
+            example:
+              planId: 3f2a9c1e-7b5d-4c1a-9e0f-1a2b3c4d5e6f
+              answers:
+                p23: { size: '42' }
+      responses:
+        '200':
+          description: Updated plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanResponse'
+        '400':
+          description: Invalid option, product not in cart, or malformed answers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/UnknownPlan'
+  /img/{file}:
+    get:
+      operationId: getImage
+      tags: [System]
+      summary: Product image (SVG)
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema: { type: string, examples: [p23.svg] }
+      responses:
+        '200':
+          description: SVG image.
+          content:
+            image/svg+xml:
+              schema: { type: string }
+        '404':
+          description: Unknown image.
+  /return:
+    get:
+      operationId: capturePayment
+      tags: [Checkout]
+      summary: PayPal return URL (capture the order)
+      description: |
+        Browser endpoint PayPal redirects the buyer to after approval. Captures the PayPal order
+        (`token`, or the plan's stored order id) and answers `302` to `/?paid=1&plan={plan}`.
+        Not intended to be called by API clients directly.
+      parameters:
+        - name: plan
+          in: query
+          required: true
+          description: The `planId` of an approved plan.
+          schema:
+            type: string
+            format: uuid
+        - name: token
+          in: query
+          required: false
+          description: PayPal order id supplied by PayPal. Falls back to the plan's stored order id.
+          schema:
+            type: string
+          example: SIMULATED-3f2a9c1e
+      responses:
+        '302':
+          description: Payment captured; redirect to the UI.
+          headers:
+            Location:
+              description: UI location with the paid flag and plan id.
+              schema:
+                type: string
+              example: /?paid=1&plan=3f2a9c1e-7b5d-4c1a-9e0f-1a2b3c4d5e6f
+        '400':
+          description: Unknown plan or no order id available.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: Unknown order
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [System]
+      summary: Liveness probe
+      description: Used by hosting platforms (Render health check).
+      responses:
+        '200':
+          description: Server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+              example:
+                ok: true
+  /openapi.yaml:
+    get:
+      operationId: getOpenApiSpec
+      tags: [System]
+      summary: This OpenAPI document
+      responses:
+        '200':
+          description: The OpenAPI 3.1 specification in YAML.
+          content:
+            application/yaml:
+              schema:
+                type: string
+components:
+  responses:
+    UnknownPlan:
+      description: No plan exists for the given id (plans are in memory and lost on restart).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Unknown plan.
+    ServerError:
+      description: Unexpected server or upstream (Gemini / PayPal) failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: 'PayPal auth failed: 401'
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+    Status:
+      type: object
+      required: [ai, paypal, hardCap]
+      properties:
+        ai:
+          type: string
+          description: Active AI backend.
+          examples: ['offline heuristic', 'gemini (gemini-2.0-flash)']
+        paypal:
+          type: string
+          enum: [sandbox, simulated]
+          description: '`simulated` when no PayPal credentials are configured.'
+        hardCap:
+          type: number
+          description: Absolute maximum per order in USD.
+          examples: [500]
+    Policy:
+      type: object
+      description: Spending policy loaded from policies.json.
+      properties:
+        monthlyBudget:
+          type: number
+          description: Default monthly wallet limit in USD.
+        blockedCategories:
+          type: array
+          items:
+            type: string
+        categoryCaps:
+          type: object
+          description: Maximum spend per order by category, in USD.
+          additionalProperties:
+            type: number
+    WalletHistoryEntry:
+      type: object
+      required: [at, amount, ref]
+      properties:
+        at:
+          type: string
+          format: date-time
+        amount:
+          type: number
+        ref:
+          type: string
+          description: PayPal order id the spend belongs to.
+    Wallet:
+      type: object
+      required: [month, limit, spent, history, remaining]
+      properties:
+        month:
+          type: string
+          pattern: '^\d{4}-\d{2}$'
+          description: Calendar month (UTC) the wallet covers.
+        limit:
+          type: number
+          description: Monthly budget in USD.
+        spent:
+          type: number
+        remaining:
+          type: number
+          description: limit minus spent.
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletHistoryEntry'
+    WalletResponse:
+      type: object
+      required: [wallet, policy]
+      properties:
+        wallet:
+          $ref: '#/components/schemas/Wallet'
+        policy:
+          $ref: '#/components/schemas/Policy'
+    PlanRequest:
+      type: object
+      required: [request]
+      properties:
+        request:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Natural-language shopping request, ideally including a budget.
+          examples: ['a gift for a new runner, under $60']
+    Intent:
+      type: object
+      description: Structured intent extracted from the request.
+      required: [goal, budget, keywords, maxItems, source]
+      properties:
+        preferences:
+          type: object
+          additionalProperties: { type: string }
+          description: Variant preferences stated by the user, e.g. {"size":"42","color":"blue"}.
+        goal:
+          type: string
+        budget:
+          type: [number, 'null']
+          description: Budget in USD, or null when none was stated.
+        keywords:
+          type: array
+          items:
+            type: string
+        maxItems:
+          type: integer
+          minimum: 1
+          maximum: 5
+        source:
+          type: string
+          enum: [ai, heuristic]
+        aiError:
+          type: string
+          description: Present when the LLM call failed and the heuristic fallback was used.
+    CartLine:
+      type: object
+      required: [id, name, category, price, tags, qty, reason, lineTotal]
+      properties:
+        id:
+          type: string
+          description: Catalog product id.
+          examples: [p01]
+        name:
+          type: string
+        category:
+          type: string
+        price:
+          type: number
+          description: Unit price in USD.
+        tags:
+          type: array
+          items:
+            type: string
+        qty:
+          type: integer
+          minimum: 1
+          maximum: 5
+        reason:
+          type: string
+          description: Why the agent picked this item.
+        lineTotal:
+          type: number
+          description: price * qty.
+        image:
+          type: string
+          description: Image path, e.g. /img/p23.svg.
+        variants:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+          description: Available options per attribute (only for products with variants).
+        variant:
+          type: object
+          additionalProperties: { type: string }
+          description: Chosen options so far, e.g. {"size":"42"}. Set by code, never by the model.
+    CatalogProduct:
+      type: object
+      required: [id, name, category, price, image, tags]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        category: { type: string }
+        price: { type: number }
+        image: { type: string }
+        variants:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+    Question:
+      type: object
+      required: [productId, name, attribute, options, question]
+      properties:
+        productId: { type: string }
+        name: { type: string }
+        attribute: { type: string, examples: [size] }
+        options: { type: array, items: { type: string } }
+        question: { type: string, examples: [What size should the Road running shoes be?] }
+    AnswerRequest:
+      type: object
+      required: [planId, answers]
+      properties:
+        planId: { type: string, format: uuid }
+        answers:
+          type: object
+          description: productId -> {attribute: option}.
+          additionalProperties:
+            type: object
+            additionalProperties: { type: string }
+    Cart:
+      type: object
+      required: [lines, total, budget, audit]
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartLine'
+        total:
+          type: number
+          description: Guarded cart total in USD. Never exceeds `budget`.
+        budget:
+          type: number
+          description: Effective cap in USD, min(request budget, hard cap, wallet remaining).
+        audit:
+          type: array
+          description: Guardrail decisions made while building this cart.
+          items:
+            type: string
+    PlanResponse:
+      type: object
+      required: [planId, intent, summary, tradeoffs, cart, questions, audit]
+      properties:
+        questions:
+          type: array
+          description: Open clarifying questions; empty when none. Approval is blocked until empty.
+          items:
+            $ref: '#/components/schemas/Question'
+        planId:
+          type: string
+          format: uuid
+        intent:
+          $ref: '#/components/schemas/Intent'
+        summary:
+          type: string
+          description: Agent explanation of the plan.
+        tradeoffs:
+          type: string
+        cart:
+          $ref: '#/components/schemas/Cart'
+        audit:
+          type: array
+          description: Full audit trail (parse, retrieval, quarantine, planning, guardrails).
+          items:
+            type: string
+    PayPalOrder:
+      type: object
+      required: [id, simulated]
+      properties:
+        id:
+          type: string
+          description: PayPal order id, or `SIMULATED-...` when simulated.
+        approveUrl:
+          type: [string, 'null']
+          format: uri
+          description: URL to send the buyer to for approval.
+        simulated:
+          type: boolean
+    PlanDetails:
+      type: object
+      required: [cart, audit, order]
+      properties:
+        cart:
+          $ref: '#/components/schemas/Cart'
+        audit:
+          type: array
+          items:
+            type: string
+        order:
+          oneOf:
+            - $ref: '#/components/schemas/PayPalOrder'
+            - type: 'null'
+          description: Null until the plan is approved.
+    ApproveRequest:
+      type: object
+      required: [planId]
+      properties:
+        planId:
+          type: string
+          format: uuid
+    ApproveResponse:
+      type: object
+      required: [order, audit, wallet]
+      properties:
+        order:
+          $ref: '#/components/schemas/PayPalOrder'
+        audit:
+          type: array
+          items:
+            type: string
+        wallet:
+          $ref: '#/components/schemas/Wallet'
