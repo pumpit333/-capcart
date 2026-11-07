@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CapCart — the AI shopping agent that never overspends</title>
+<style>
+  :root { --v:#5B5BF0; --b:#3B82F6; --grad:linear-gradient(135deg,#5B5BF0,#3B82F6); --bg:#F2F3FB; --card:#fff; --line:#E7E9F5; --muted:#6B7390; --text:#161A33; --ok:#16A34A; --warn:#D97706; --bad:#DC2626; --sh:0 6px 24px rgba(60,70,160,.10); }
+  * { box-sizing:border-box; }
+  html,body { overflow-x:hidden; } body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  button { font-family:inherit; }
+  .hero { background:var(--grad); color:#fff; padding:18px 20px 74px; }
+  .wrap { max-width:1240px; margin:0 auto; }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .logo { font-size:24px; font-weight:800; letter-spacing:-.5px; display:flex; align-items:center; gap:10px; }
+  .logo i { font-style:normal; background:#fff3; border-radius:12px; width:38px; height:38px; display:grid; place-items:center; font-size:20px; }
+  .tag { margin:10px 0 0; opacity:.92; font-size:14px; }
+  .tag b { font-weight:700; }
+  #status { display:flex; gap:6px; flex-wrap:wrap; }
+  .badge { font-size:12px; padding:3px 10px; border-radius:999px; background:#EEF0FA; color:var(--muted); white-space:nowrap; font-weight:600; }
+  .hero .badge { background:#ffffff26; color:#fff; }
+  .badge.ok { background:#DCFCE7; color:#166534; } .badge.warn { background:#FEF3C7; color:#92400E; } .badge.bad { background:#FEE2E2; color:#991B1B; }
+  main.wrap { padding:0 20px 60px; margin-top:-54px; }
+  .card { background:var(--card); border-radius:20px; padding:18px; box-shadow:var(--sh); margin-bottom:16px; }
+  .card h2 { margin:0 0 10px; font-size:17px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .reason { color:var(--muted); font-size:13px; }
+  .wallet { display:flex; gap:22px; align-items:center; flex-wrap:wrap; }
+  .wallet .bar { flex:1 1 260px; }
+  .wallet .big { font-size:24px; font-weight:800; }
+  .meter { height:10px; background:#E9EBF7; border-radius:999px; overflow:hidden; margin:8px 0 6px; }
+  .meter > div { height:100%; background:var(--grad); border-radius:999px; transition:width .6s; }
+  .meter > div.hot { background:linear-gradient(90deg,#F59E0B,#F97316); }
+  .policy { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .layout { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:16px; align-items:start; }
+  .side { position:sticky; top:12px; max-height:calc(100vh - 24px); overflow:auto; scrollbar-width:thin; border-radius:20px; }
+  @media (max-width:960px){ .layout { grid-template-columns:minmax(0,1fr); } .side { position:static; max-height:none; } }
+  .pills { display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; margin-bottom:10px; }
+  .pill { border:0; background:#EEF0FA; color:var(--muted); padding:8px 14px; border-radius:999px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; text-transform:capitalize; }
+  .pill[aria-pressed=true] { background:var(--grad); color:#fff; }
+  .products { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+  .tile { border:1px solid var(--line); background:#fff; border-radius:16px; padding:8px; text-align:left; cursor:pointer; transition:transform .15s, box-shadow .15s; color:inherit; }
+  .tile:hover { transform:translateY(-2px); box-shadow:var(--sh); }
+  .tile img, .thumb { width:100%; aspect-ratio:1; object-fit:cover; border-radius:12px; background:#EEF0FA; display:block; }
+  .tile .n { font-size:13px; font-weight:600; margin:8px 2px 2px; line-height:1.25; min-height:32px; }
+  .tile .p { font-weight:800; margin:0 2px; font-size:15px; }
+  .sizes { display:flex; gap:3px; flex-wrap:wrap; margin:6px 2px 2px; }
+  .sizes span { font-size:10px; background:#EEF0FA; color:var(--muted); border-radius:6px; padding:1px 5px; font-weight:600; }
+  /* chat */
+  .chat { display:flex; flex-direction:column; gap:10px; margin:6px 0 12px; max-height:380px; overflow:auto; padding:2px; }
+  .msg { max-width:88%; padding:10px 14px; border-radius:18px; font-size:14px; line-height:1.45; }
+  .msg.user { align-self:flex-end; background:var(--grad); color:#fff; border-bottom-right-radius:4px; }
+  .msg.agent { align-self:flex-start; background:#F1F2FC; border-bottom-left-radius:4px; }
+  .msg .opts { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .opt, .chip { border:1.5px solid #D7DAF3; background:#fff; color:var(--text); border-radius:999px; padding:6px 13px; font-size:13px; font-weight:600; cursor:pointer; }
+  .opt:hover, .chip:hover { border-color:var(--v); color:var(--v); }
+  .opt[aria-pressed=true] { background:var(--grad); color:#fff; border-color:transparent; }
+  .chip { background:#F6F7FE; font-weight:500; }
+  .composer { display:flex; gap:8px; }
+  textarea { flex:1; min-height:48px; max-height:120px; border:1.5px solid var(--line); border-radius:14px; padding:12px; font:inherit; font-size:14px; resize:vertical; color:var(--text); }
+  textarea:focus-visible, .toolbar input:focus-visible { outline:2px solid var(--v); border-color:transparent; }
+  button:focus-visible, .tile:focus-visible, .pill:focus-visible { outline:2px solid var(--v); outline-offset:2px; }
+  .btn { background:var(--grad); color:#fff; border:0; border-radius:14px; padding:0 18px; font-size:14px; font-weight:700; cursor:pointer; min-height:44px; }
+  .btn:hover:not(:disabled) { filter:brightness(1.08); } .btn:disabled { opacity:.45; cursor:default; }
+  .btn.secondary { background:#EEF0FA; color:var(--text); }
+  .btn.pay { background:#FFC439; color:#111; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+  /* cart */
+  .line { display:flex; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); }
+  .line .thumb { width:56px; height:56px; flex:none; }
+  .line .info { flex:1; min-width:0; } .line .nm { font-weight:600; font-size:14px; }
+  .line .pr { font-weight:800; white-space:nowrap; }
+  .total { font-size:26px; font-weight:800; }
+  .stats { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+  .stat { background:#F6F7FE; border-radius:12px; padding:8px 12px; font-size:12px; color:var(--muted); flex:1 1 70px; }
+  .stat b { display:block; font-size:18px; color:var(--text); }
+  .paid { box-shadow:0 0 0 2px var(--ok) inset, var(--sh); }
+  #cartGrid { height:260px; margin-top:12px; } #auditGrid { height:340px; }
+  .fallback { width:100%; border-collapse:collapse; }
+  .fallback td,.fallback th { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); font-size:13px; vertical-align:top; }
+  .fallback tr.guard td { background:#FEF3C7; color:#92400E; }
+  .ag-row.guard-row { background:rgba(245,158,11,.16) !important; } .ag-row.guard-row .ag-cell { color:#92400E; }
+  .toolbar { display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+  .toolbar input { border:1.5px solid var(--line); border-radius:12px; padding:8px 10px; font-size:14px; flex:1 1 200px; }
+  .toolbar .btn { min-height:36px; font-size:13px; }
+  /* drawer */
+  #ov { position:fixed; inset:0; background:#161A3380; display:none; z-index:20; }
+  #ov.open { display:block; }
+  #drawer { position:fixed; right:0; top:0; bottom:0; width:min(420px,100%); background:#fff; z-index:21; padding:18px; overflow:auto; transform:translateX(100%); transition:transform .25s; border-radius:24px 0 0 24px; }
+  #drawer.open { transform:none; }
+  #drawer .big { width:100%; aspect-ratio:1; object-fit:cover; border-radius:18px; background:#EEF0FA; }
+  .vgroup { margin:14px 0 0; } .vgroup .lbl { font-size:12px; color:var(--muted); font-weight:700; text-transform:uppercase; margin-bottom:6px; }
+  .x { position:absolute; right:14px; top:14px; background:#fffc; border:0; width:36px; height:36px; border-radius:50%; font-size:18px; cursor:pointer; }
+  @media (max-width:640px){ .hero{padding-bottom:70px} .logo{font-size:21px} #drawer{border-radius:24px 24px 0 0; top:12%; width:100%} }
+.ag-cell-wrap-text{line-height:1.4!important;padding-top:8px;padding-bottom:8px;word-break:normal;white-space:normal}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@33/dist/ag-grid-community.min.js" async onerror="window.__agFail=1"></script>
+</head>
+<body>
+<div class="hero"><div class="wrap">
+  <div class="top"><div class="logo"><i aria-hidden="true">🛒</i>CapCart</div><div id="status" aria-label="System status"></div></div>
+  <p class="tag">An AI shopping agent with a hard budget cap — <b>AI proposes → code guarantees → you approve → PayPal pays.</b></p>
+</div></div>
+<main class="wrap">
+  <div class="card wallet" id="wallet" aria-label="Wallet"></div>
+  <div class="layout">
+    <section id="shop" class="card" aria-label="Shop">
+      <h2>Shop <span class="reason" id="shopCount"></span></h2>
+      <div class="pills" id="pills" role="group" aria-label="Categories"></div>
+      <div class="products" id="products"></div>
+    </section>
+    <div class="side" id="side">
+      <section class="card" aria-label="AI agent">
+        <h2>🤖 CapCart agent <span class="badge ok">guardrails on</span></h2>
+        <div class="chat" id="chat" aria-live="polite"><div class="msg agent">Hi! Tell me what to buy and your budget. I'll propose a cart; code enforces the limits; you approve.</div></div>
+        <div class="row" style="margin:0 0 10px">
+          <button class="chip" data-q="A gift for a friend who just started running, under $60">🏃 Runner gift ≤ $60</button>
+          <button class="chip" data-q="Running shoes under $70">👟 Running shoes under $70</button>
+          <button class="chip" data-q="Upgrade my home office desk setup for $80">💻 Desk setup $80</button>
+          <button class="chip" data-q="Gift for a runner under $60, maybe a whisky gift set too">🛡️ Policy + injection demo</button>
+          <button class="chip" data-q="Coffee lover starter kit, max 50 dollars">☕ Coffee kit ≤ $50</button>
+        </div>
+        <div class="composer"><textarea id="req" aria-label="What should the agent buy?" placeholder="e.g. A gift for a friend who just started running, under $60"></textarea><button class="btn" id="planBtn">Plan</button></div>
+      </section>
+      <div id="cart"></div>
+    </div>
+  </div>
+  <div id="auditWrap"></div>
+</main>
+<div id="ov"></div>
+<aside id="drawer" role="dialog" aria-modal="true" aria-label="Product details" aria-hidden="true"></aside>
+<script>
+const $ = (s) => document.querySelector(s);
+let current = null, grids = [], catalog = [], cat = 'all', answers = {}, paidView = false;
+const GUARD = /rejected|over budget|quarantined|blocked|injection|policy:|capped|removed|trimmed/i;
+const money = (n) => '$' + Number(n || 0).toFixed(2);
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+const IMG = (src) => `<img class="thumb" src="${esc(src || '/img/placeholder.svg')}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/img/placeholder.svg'">`;
+const variantText = (v) => v ? Object.values(v).filter(Boolean).join(' / ') : '';
+
+fetch('/api/status').then(r => r.json()).then(s => {
+  const ok = (v) => /sim|offline|heur|none|off/i.test(v) ? 'warn' : 'ok';
+  $('#status').innerHTML = `<span class="badge ${ok(s.ai)}">AI: ${esc(s.ai)}</span><span class="badge ${ok(s.paypal)}">PayPal: ${esc(s.paypal)}</span><span class="badge">Hard cap $${esc(s.hardCap)}</span>`;
+}).catch(() => {});
+function loadWallet() {
+  fetch('/api/wallet').then(r => r.json()).then(d => {
+    const w = d.wallet, p = d.policy;
+    const used = w.limit ? Math.min(100, ((w.limit - w.remaining) / w.limit) * 100) : 0;
+    $('#wallet').innerHTML = `
+      <div class="bar"><b>💰 Monthly wallet</b> <span class="reason">${esc(w.month)}</span>
+        <div class="big">${money(w.remaining)} <span class="reason">left of ${money(w.limit)}</span></div>
+        <div class="meter" role="progressbar" aria-valuenow="${used.toFixed(0)}" aria-valuemin="0" aria-valuemax="100" aria-label="Wallet used"><div style="width:${used}%"></div></div></div>
+      <div class="policy"><span class="reason">Blocked:</span>${(p.blockedCategories||[]).map(c => `<span class="badge bad">${esc(c)}</span>`).join('')}
+        <span class="reason">Caps/order:</span>${Object.entries(p.categoryCaps||{}).map(([k,v]) => `<span class="badge warn">${esc(k)} $${esc(v)}</span>`).join('')}</div>`;
+  }).catch(() => {});
+}
+loadWallet();
+
+/* ---------- shop ---------- */
+fetch('/api/catalog').then(r => { if (!r.ok) throw 0; return r.json(); }).then(c => {
+  if (!Array.isArray(c) || !c.length) throw 0;
+  catalog = c; renderShop();
+}).catch(() => { $('#shop').style.display = 'none'; $('.layout').style.gridTemplateColumns = 'minmax(0,720px)'; });
+function renderShop() {
+  const cats = ['all', ...new Set(catalog.map(p => p.category))];
+  $('#pills').innerHTML = cats.map(c => `<button class="pill" data-c="${esc(c)}" aria-pressed="${c === cat}">${esc(c)}</button>`).join('');
+  document.querySelectorAll('.pill').forEach(b => b.onclick = () => { cat = b.dataset.c; renderShop(); });
+  const list = catalog.filter(p => cat === 'all' || p.category === cat);
+  $('#shopCount').textContent = list.length + ' items';
+  $('#products').innerHTML = list.map(p => `<button class="tile" data-id="${esc(p.id)}" aria-label="${esc(p.name)}, ${money(p.price)}">${IMG(p.image)}
+    <div class="n">${esc(p.name)}</div><div class="p">${money(p.price)}</div>
+    ${p.variants && p.variants.size ? `<div class="sizes">${p.variants.size.slice(0,5).map(s => `<span>${esc(s)}</span>`).join('')}</div>` : ''}</button>`).join('');
+  document.querySelectorAll('.tile').forEach(t => t.onclick = () => openDrawer(t.dataset.id, t));
+}
+let lastFocus = null;
+function openDrawer(id, from) {
+  const p = catalog.find(x => x.id === id); if (!p) return;
+  lastFocus = from; const sel = {};
+  const v = p.variants || {};
+  $('#drawer').innerHTML = `<button class="x" id="dx" aria-label="Close">✕</button>
+    <img class="big" src="${esc(p.image || '/img/placeholder.svg')}" alt="${esc(p.name)}" onerror="this.onerror=null;this.src='/img/placeholder.svg'">
+    <h2 style="margin:14px 0 2px">${esc(p.name)}</h2><div class="reason" style="text-transform:capitalize">${esc(p.category)}</div>
+    <div class="total" style="margin:6px 0">${money(p.price)}</div>
+    ${Object.entries(v).map(([k, arr]) => `<div class="vgroup"><div class="lbl">${esc(k)}</div><div class="opts row" style="margin:0">${(arr||[]).map(o => `<button class="opt" data-k="${esc(k)}" data-v="${esc(o)}" aria-pressed="false">${esc(o)}</button>`).join('')}</div></div>`).join('')}
+    <div class="row" style="margin-top:18px"><button class="btn" id="askBtn" style="flex:1">Ask the agent to buy this</button></div>`;
+  $('#drawer').querySelectorAll('.opt').forEach(b => b.onclick = () => {
+    sel[b.dataset.k] = b.dataset.v;
+    $('#drawer').querySelectorAll(`.opt[data-k="${CSS.escape(b.dataset.k)}"]`).forEach(o => o.setAttribute('aria-pressed', o === b));
+  });
+  $('#askBtn').onclick = () => {
+    const extra = Object.values(sel).length ? ` (${Object.entries(sel).map(([k, x]) => k + ' ' + x).join(', ')})` : '';
+    $('#req').value = `Buy ${p.name}${extra} under $${Math.ceil(p.price)}`;
+    closeDrawer(); $('#side').scrollIntoView({ behavior:'smooth', block:'start' }); $('#req').focus();
+  };
+  $('#dx').onclick = closeDrawer;
+  $('#ov').classList.add('open'); $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); $('#dx').focus();
+}
+function closeDrawer() {
+  $('#ov').classList.remove('open'); $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true');
+  if (lastFocus) lastFocus.focus();
+}
+$('#ov').onclick = closeDrawer;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+/* ---------- agent chat ---------- */
+document.querySelectorAll('.chip').forEach(c => c.onclick = () => { $('#req').value = c.dataset.q; $('#req').focus(); });
+function addMsg(cls, html) {
+  const d = document.createElement('div'); d.className = 'msg ' + cls; d.innerHTML = html;
+  $('#chat').appendChild(d); $('#chat').scrollTop = 1e6; return d;
+}
+$('#planBtn').onclick = async () => {
+  const request = $('#req').value.trim(); if (!request) return;
+  addMsg('user', esc(request));
+  await call('/api/plan', { request });
+};
+$('#req').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#planBtn').click(); });
+async function call(url, body) {
+  $('#planBtn').disabled = true; $('#planBtn').textContent = '…';
+  const think = addMsg('agent', '<span class="reason">Thinking…</span>');
+  try {
+    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    think.remove(); current = data; answers = {}; render(data);
+  } catch (e) { think.innerHTML = '⚠️ ' + esc(e.message); }
+  $('#planBtn').disabled = false; $('#planBtn').textContent = 'Plan';
+}
+function agentSay(d) {
+  const lines = (d.cart && d.cart.lines) || [];
+  let h = d.summary ? esc(d.summary) : (lines.length ? `I put together ${lines.length} item(s) for ${money(d.cart.total)}.` : 'I could not find matching items within budget.');
+  if (d.tradeoffs) h += `<div class="reason" style="margin-top:6px">Trade-offs: ${esc(d.tradeoffs)}</div>`;
+  addMsg('agent', h);
+  (d.questions || []).forEach(q => {
+    const m = addMsg('agent', `<b>${esc(q.question || ('Choose ' + q.attribute + ' for ' + q.name))}</b><div class="opts" role="group" aria-label="${esc(q.name)} ${esc(q.attribute)}">${(q.options || []).map(o => `<button class="opt" data-o="${esc(o)}" aria-pressed="false">${esc(o)}</button>`).join('')}</div>`);
+    m.querySelectorAll('.opt').forEach(b => b.onclick = () => {
+      (answers[q.productId] = answers[q.productId] || {})[q.attribute] = b.dataset.o;
+      m.querySelectorAll('.opt').forEach(o => o.setAttribute('aria-pressed', o === b));
+      if (d.questions.every(x => answers[x.productId] && answers[x.productId][x.attribute])) {
+        addMsg('user', esc(Object.values(answers).map(a => Object.values(a).join(', ')).join('; ')));
+        call('/api/answer', { planId: d.planId, answers: JSON.parse(JSON.stringify(answers)) });
+      }
+    });
+  });
+}
+
+/* ---------- grid ---------- */
+function stageOf(a) {
+  const m = /^([A-Za-z][\w \-\/]{1,24}?)\s*[:—-]\s/.exec(a);
+  return m ? m[1] : (GUARD.test(a) ? 'Guardrail' : 'Agent');
+}
+function fallbackTable(cols, rows, guardIdx) {
+  return `<table class="fallback"><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>${rows.map((r, i) => `<tr class="${guardIdx && guardIdx(i) ? 'guard' : ''}">${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</table>`;
+}
+function makeGrid(el, opts, fallbackHtml) {
+  if (window.agGrid && agGrid.createGrid) {
+    const theme = agGrid.themeQuartz ? agGrid.themeQuartz.withParams({ accentColor:'#5B5BF0', fontSize:13, headerBackgroundColor:'#F6F7FE', borderColor:'#E7E9F5' }) : undefined;
+    const api = agGrid.createGrid(el, { ...(theme ? { theme } : {}), ...opts });
+    grids.push(api); return api;
+  }
+  el.style.height = 'auto'; el.innerHTML = fallbackHtml; return null;
+}
+
+function render(d, paid) {
+  paidView = !!paid;
+  grids.forEach(g => { try { g.destroy(); } catch (e) {} }); grids = [];
+  const c = d.cart, audit = d.audit || [], lines = c.lines || [], qs = d.questions || [];
+  if (!paid) agentSay(d);
+  const pct = Math.min(100, c.budget ? (c.total / c.budget) * 100 : 0);
+  const guards = audit.filter(a => GUARD.test(a)).length;
+  const units = lines.reduce((s, l) => s + l.qty, 0);
+  const pending = qs.length > 0;
+  $('#cart').innerHTML = `
+    <section class="card ${paid ? 'paid' : ''}" aria-label="Cart">
+      <h2>${paid ? '✅ Paid via PayPal' : '🛍️ Proposed cart'} <span class="badge ${paid ? 'ok' : 'warn'}">${paid ? 'Paid' : pending ? 'Answer the questions' : 'Awaiting your approval'}</span></h2>
+      ${lines.length ? lines.map(l => `<div class="line">${IMG(l.image)}<div class="info"><div class="nm">${esc(l.name)}</div>
+        <div class="reason">${l.variant && variantText(l.variant) ? `<span class="badge">${esc(variantText(l.variant))}</span> ` : ''}Qty ${esc(l.qty)} · ${money(l.price)} ea</div></div><div class="pr">${money(l.lineTotal)}</div></div>`).join('') : '<p class="reason">No items in the cart yet.</p>'}
+      <div class="meter" style="margin-top:14px"><div class="${pct > 90 ? 'hot' : ''}" style="width:${pct}%"></div></div>
+      <div class="total">${money(c.total)} <span class="reason">of ${money(c.budget)} budget · ${pct.toFixed(0)}% used</span></div>
+      <div class="stats"><div class="stat"><b>${lines.length}</b>items</div><div class="stat"><b>${units}</b>units</div><div class="stat"><b>${guards}</b>guardrail actions</div><div class="stat"><b>${money(Math.max(0, c.budget - c.total))}</b>headroom</div></div>
+      ${lines.length ? '<div id="cartGrid"></div>' : ''}
+      ${!paid && lines.length ? `<div class="row"><button id="approveBtn" class="btn pay" style="flex:1" ${pending ? 'disabled title="Answer the agent\'s questions first"' : ''}>Approve &amp; pay with PayPal</button><button class="btn secondary" id="replanBtn">Re-plan</button></div>${pending ? '<p class="reason">Answer the agent\'s question(s) to unlock approval.</p>' : ''}` : ''}
+    </section>`;
+  $('#auditWrap').innerHTML = `<section class="card" aria-label="Audit trail"><h2>🛡️ Agent audit trail <span class="badge">${audit.length} steps</span> <span class="badge ${guards ? 'warn' : 'ok'}">${guards} guardrail actions</span></h2>
+      <div class="toolbar"><input id="auditFilter" placeholder="Filter audit log…" aria-label="Filter audit log"><button class="btn secondary" id="guardOnly">Guardrail actions only</button></div>
+      <div id="auditGrid"></div></section>`;
+
+  if (lines.length) {
+    const rows = lines.map(l => ({ name:l.name, variant:variantText(l.variant), qty:l.qty, price:l.price, lineTotal:l.lineTotal, reason:l.reason || '' }));
+    makeGrid($('#cartGrid'), {
+      rowData: rows, domLayout:'autoHeight',
+      defaultColDef: { sortable:true, filter:true, resizable:true },
+      columnDefs: [
+        { field:'name', headerName:'Item', flex:2, minWidth:110, wrapText:true, autoHeight:true },
+        { field:'variant', headerName:'Variant', width:84 },
+        { field:'qty', headerName:'Qty', width:60, type:'numericColumn' },
+        { field:'lineTotal', headerName:'Total', width:84, type:'numericColumn', valueFormatter:p => money(p.value), cellStyle:{ fontWeight:'700' } },
+        { field:'reason', headerName:'AI reason', flex:3, minWidth:140, wrapText:true, autoHeight:true, tooltipField:'reason' }
+      ]
+    }, fallbackTable(['Item','Variant','Qty','Total','AI reason'], rows.map(r => [r.name, r.variant, r.qty, money(r.lineTotal), r.reason])));
+    $('#cartGrid').style.height = 'auto';
+  }
+  const arows = audit.map((a, i) => ({ step:i + 1, stage:stageOf(a), message:a, guard:GUARD.test(a) }));
+  const agApi = makeGrid($('#auditGrid'), {
+    rowData: arows, defaultColDef: { sortable:true, filter:true, resizable:true },
+    rowClassRules: { 'guard-row': p => p.data.guard },
+    columnDefs: [
+      { field:'step', headerName:'#', width:80, filter:'agNumberColumnFilter' },
+      { field:'stage', headerName:'Stage', width:150 },
+      { field:'message', headerName:'Message', flex:1, minWidth:300, wrapText:true, autoHeight:true,
+        cellRenderer: p => { const s = document.createElement('span'); s.textContent = (p.data.guard ? '⚠ ' : '') + p.value; return s; } }
+    ]
+  }, fallbackTable(['#','Stage','Message'], arows.map(r => [r.step, r.stage, r.message]), i => arows[i].guard));
+  let only = false;
+  $('#auditFilter').oninput = (e) => { if (agApi) agApi.setGridOption('quickFilterText', e.target.value); else filterFallback(); };
+  $('#guardOnly').onclick = () => {
+    only = !only; $('#guardOnly').textContent = only ? 'Show all' : 'Guardrail actions only';
+    if (agApi) { agApi.setGridOption('isExternalFilterPresent', () => only); agApi.setGridOption('doesExternalFilterPass', n => n.data.guard); agApi.onFilterChanged(); }
+    else filterFallback();
+  };
+  function filterFallback() {
+    const q = $('#auditFilter').value.toLowerCase();
+    document.querySelectorAll('#auditGrid tr:not(:first-child)').forEach((tr, i) => { tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) && (!only || arows[i].guard) ? '' : 'none'; });
+  }
+  const btn = $('#approveBtn'); if (btn) btn.onclick = approve;
+  const rb = $('#replanBtn'); if (rb) rb.onclick = () => $('#planBtn').click();
+}
+
+async function approve() {
+  const b = $('#approveBtn'); b.disabled = true;
+  try {
+    const r = await fetch('/api/approve', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ planId: current.planId }) });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    window.location.href = data.order.approveUrl;
+  } catch (e) { b.disabled = false; addMsg('agent', '⚠️ ' + esc(e.message)); }
+}
+
+const params = new URLSearchParams(location.search);
+if (params.get('paid') && params.get('plan')) {
+  fetch('/api/plan?id=' + encodeURIComponent(params.get('plan'))).then(r => r.json()).then(d => {
+    if (!d.error) { current = d; addMsg('agent', '✅ Payment complete. Thanks for shopping with CapCart!'); render({ ...d, summary: '', questions: [] }, true); loadWallet(); }
+  });
+}
+</script>
+</body>
+</html>
